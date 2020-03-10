@@ -118,6 +118,18 @@ class Cache():
     cached_epg = {}
     def __init__(self):
         pass
+    
+    @staticmethod
+    def trim_cached_epg():
+        old_dates = []
+        for key, val in Cache.cached_epg.items():
+            params = key.split('|')
+            if params[0] == 'PREPEPGFORCH':
+                dt = dateFromString(params[1], '%Y-%m-%d')
+                if datetime.now() - timedelta(days=8) > dt:
+                    old_dates.append(key)
+        for key in old_dates:
+            Cache.cached_epg.pop(key, None)
 
 
 class Shortcut(CBaseHostClass):
@@ -192,13 +204,6 @@ class Shortcut(CBaseHostClass):
         timestamp_from = dateTounixTS(dateUtc1)
         timestamp_to = dateTounixTS(dateUtc2)
     
-        #chids = chid
-        #if isEmpty(chids): chids = '*'
-        #key_str = 'GETEPG|' + str(timestamp_from) + '|' + str(timestamp_to) + '|' + chids
-        #if Cache.cached_epg.has_key(key_str):
-        #    printDBG("[Shortcut.lv] Getting EPG  from cache")
-        #    return Cache.cached_epg[key_str]
-
         url = self.API_ENDPOINT + "/get/content/epgs/?include=channel&page[size]=100000&filter[utTo]="+str(timestamp_to)+"&filter[utFrom]="+str(timestamp_from)
         if not isEmpty(chid):
             url = url + "&filter[channel]=" + str(chid)
@@ -215,8 +220,6 @@ class Shortcut(CBaseHostClass):
         except ValueError, e:
             printDBG("[Shortcut.lv] Did not receive json, something wrong: " + response_text)
             return None
-
-        #Cache.cached_epg[key_str] = json_object
 
         return json_object
 
@@ -291,30 +294,20 @@ class Shortcut(CBaseHostClass):
         return events
 
 
-    def prepare_epg_now(self):
-        #epg_data = get_epg_now()
-        date_now = datetime.fromtimestamp(time.time())
-        date_today = dateToDateTime(date.today())
-
-        sdate = date_today.strftime('%Y-%m-%d')
-        key_str = 'PREPEPGNOW|' + sdate
-        if Cache.cached_epg.has_key(key_str):
-            printDBG("[Shortcut.lv] prepare_epg_now hit cache")
-            pepg = Cache.cached_epg[key_str]
-            return self.filter_pepg(pepg, True, '', date_now, date_now)
-
-        epg_data = self.get_epg_for_channel(date_today, '')
-        if epg_data is None: return {}
-        pepg = self.prepare_epg(epg_data, False)
-        Cache.cached_epg[key_str] = pepg
-        pepg = self.filter_pepg(pepg, True, '', date_now, date_now)
-        return pepg
-
-
-    def prepare_epg_for_channel(self, date, chid):
-        sdateutc = dateFromLocalToUtc(date).strftime('%Y-%m-%d')
+    def prepare_epg_for_channel(self, date, chid = ''):
+        sdateutc = date.strftime('%Y-%m-%d')
         schid = chid
         if isEmpty(schid): schids = '*'
+
+        key_str = 'PREPEPGFORCH|' + sdateutc + '|*'
+        if Cache.cached_epg.has_key(key_str):
+            printDBG("[Shortcut.lv] prepare_epg_for_channel hit cache")
+            pepg = Cache.cached_epg[key_str]
+            if schids == '*':
+                return pepg
+            else:
+                return self.filter_pepg(pepg, False, chid)
+
         key_str = 'PREPEPGFORCH|' + sdateutc + '|' + schid
         if Cache.cached_epg.has_key(key_str):
             printDBG("[Shortcut.lv] prepare_epg_for_channel hit cache")
@@ -324,6 +317,16 @@ class Shortcut(CBaseHostClass):
         if epg_data is None: return {}
         pepg = self.prepare_epg(epg_data, False)
         Cache.cached_epg[key_str] = pepg
+        Cache.trim_cached_epg()
+        return pepg
+
+
+    def prepare_epg_now(self):
+        #epg_data = get_epg_now()
+        date_now = datetime.fromtimestamp(time.time())
+        date_today = dateToDateTime(date.today())
+        pepg = self.prepare_epg_for_channel(date_today)
+        pepg = self.filter_pepg(pepg, True, '', date_now, date_now)
         return pepg
 
 
@@ -336,7 +339,6 @@ class Shortcut(CBaseHostClass):
         printDBG("[Shortcut.lv] [Login] User: " + username + ";UID: " + uid + "; Token: " + token + "; LastLogin: " + lastlogin)
         lastlogin_date = getLastLoggedIn()
 
-
         if isEmpty(username) or isEmpty(password):
             return False
     
@@ -344,6 +346,7 @@ class Shortcut(CBaseHostClass):
         update = update or (abs(lastlogin_date - datetime.now()) > timedelta(days=1))
     
         if not update:
+            printDBG("[Shortcut.lv] [Login] using current token")
             return True
 
         values = {'id': username,
@@ -497,8 +500,8 @@ class Shortcut(CBaseHostClass):
    
     def listMainMenu(self):
         printDBG("Shortcut.listMainMenu")
-        self.addDir({'category': 'live', 'title': 'Tiesraide' , 'url': '', 'text_color': 'yellow'})              
-        self.addDir({'category': 'archive', 'title': 'Arhivs' , 'url': '', 'text_color': 'yellow'})              
+        self.addDir({'category': 'live', 'title': u'Tiešraide'.encode('utf8') , 'url': '', 'text_color': 'yellow'})              
+        self.addDir({'category': 'archive', 'title': u'Arhīvs'.encode('utf8') , 'url': '', 'text_color': 'yellow'})              
 
     
     def listLiveItems(self,cItem):
@@ -535,7 +538,7 @@ class Shortcut(CBaseHostClass):
         
         channels = self.get_channels()
         for c in channels:
-            name = (c['name'] + ' (arhivs)').encode('utf8')
+            name = (c['name'] + u' (arhīvs)').encode('utf8')
             url = c['name'] + '|' + c['id']
             self.addDir({'category': 'archivedates', 'title': name , 'url': url})
 
